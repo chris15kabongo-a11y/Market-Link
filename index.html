@@ -116,6 +116,17 @@ const R={
 'DELETE subs/:id':async(b,id)=>{await role('buyer');ok(await sb.from('subscriptions').delete().eq('id',id));return{ok:true}},
 'GET subs':async()=>{const u=await role('buyer'),{L}=await snap();return ok(await sb.from('subscriptions').select('*').order('id',{ascending:false})).map(x=>plan({...x,qty:+x.qty},u,L))},
 'GET deliveries':async()=>{await role('farmer');return ok(await sb.rpc('my_deliveries')).map(x=>({...x,qty:+x.qty,next:sat(x.freq=='monthly')}))},
+'GET unread':async()=>{const u=await uid(),{count,error}=await sb.from('messages').select('id',{count:'exact',head:true}).eq('recipient_id',u.id).eq('read',false);if(error)throw new Err(400,error.message);return count||0},
+'GET chats':async()=>{const u=await uid(),[ms,cs,ps]=(await Promise.all([sb.from('messages').select('*').order('id',{ascending:false}).limit(500),sb.rpc('chat_contacts'),sb.from('public_profiles').select('*')])).map(ok),P={},out={};
+ ps.forEach(x=>P[x.id]=x);cs.forEach(c=>out[c.id]={...c,last:'',ts:0,unread:0});
+ ms.forEach(m=>{const o=m.sender_id==u.id?m.recipient_id:m.sender_id;if(!P[o])return;const c=out[o]||(out[o]={...P[o],last:'',ts:0,unread:0});if(!c.ts){c.last=(m.sender_id==u.id?'You: ':'')+m.body;c.ts=Date.parse(m.created_at)}if(m.recipient_id==u.id&&!m.read)c.unread++});
+ return Object.values(out).sort((a,b)=>b.ts-a.ts||(a.name||'').localeCompare(b.name||''))},
+'GET thread':async(b,id,q)=>{const u=await uid();if(!/^[0-9a-f-]{36}$/i.test(q))throw new Err(400,'Chat not found');
+ const[ms,ps]=(await Promise.all([sb.from('messages').select('*').or(`sender_id.eq.${q},recipient_id.eq.${q}`).order('id').limit(300),sb.from('public_profiles').select('*').eq('id',q)])).map(ok);
+ if(!ps[0])throw new Err(404,'Chat not found');
+ if(ms.some(m=>m.recipient_id==u.id&&!m.read))ok(await sb.rpc('mark_read',{p_other:q}));
+ return{other:ps[0],msgs:ms.map(m=>({...m,mine:m.sender_id==u.id}))}},
+'POST send':async b=>{ok(await sb.rpc('send_message',{p_to:b.to,p_body:b.body}));return{ok:true}},
 'GET notifications':async()=>{await uid();return ok(await sb.from('notifications').select('*').order('id',{ascending:false}).limit(30)).map(n=>({...n,ts:n.created_at}))}};
 return async(p,m='GET',b)=>{try{const[path,qs]=p.split('?'),seg=path.split('/'),id=+(seg.find(x=>/^\d+$/.test(x))||0),h=R[m+' '+seg.map(x=>/^\d+$/.test(x)?':id':x).join('/')];
  if(!h)throw new Err(404,'Not found');return await h(b||{},id,new URLSearchParams(qs||'').get('q')||'')}
@@ -137,10 +148,10 @@ async function submitAuth(){try{const b={email:V('e'),password:V('p')};
   const r=await api(S.reg?'register':'login','POST',b);S.token=r.token;try{localStorage.setItem('t',r.token)}catch(e){}S.user=r.user;S.cat=r.cat;S.tab='home';draw()}catch(e){toast(e.message)}}
 
 /* ---------- shell ---------- */
-const head=()=>`<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><div class="img" style="width:44px;height:44px;font-size:22px;border-radius:50%">${S.user.role=='farmer'?'🧑‍🌾':'🛒'}</div><div class="grow"><div class="mut">${S.user.role=='farmer'?'Selling from':'Deliver to'}</div><select class="loc" onchange="setLoc(this.value)">${opts(TOWNS,S.user.location)}</select></div><button class="ic" aria-label="Notifications" onclick="go('notif')">🔔</button></div>`;
+const head=()=>`<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><div class="img" style="width:44px;height:44px;font-size:22px;border-radius:50%">${S.user.role=='farmer'?'🧑‍🌾':'🛒'}</div><div class="grow"><div class="mut">${S.user.role=='farmer'?'Selling from':'Deliver to'}</div><select class="loc" onchange="setLoc(this.value)">${opts(TOWNS,S.user.location)}</select></div><button class="ic" aria-label="Messages" onclick="go('chat')" style="position:relative">💬<span id="ub" class="tag" style="position:absolute;top:-4px;right:-6px;${S.unread?'':'display:none'}">${S.unread||''}</span></button><button class="ic" aria-label="Notifications" onclick="go('notif')">🔔</button></div>`;
 const nav=()=>`<nav>${[['home','🏠','Home'],['browse','🔍','Browse'],['reqs','📋','Requests'],['plan',S.user.role=='farmer'?'🌱':'🔁',S.user.role=='farmer'?'Sell':'Plan'],['me','👤','Profile']].map(([k,i,l])=>`<button class="${S.tab==k?'on':''}" onclick="go('${k}')"><div style="font-size:20px">${i}</div>${l}</button>`).join('')}</nav>`;
 async function draw(){const a=E('app');if(!S.user){a.innerHTML=auth();return}
-  try{const b=await VIEWS[S.tab]();a.innerHTML=head()+b+nav();if(S.tab=='browse')loadBrowse()}catch(e){toast(e.message)}}
+  try{const b=await VIEWS[S.tab]();S.unread=await api('unread').catch(()=>0);a.innerHTML=head()+b+nav();if(S.tab=='browse')loadBrowse();if(S.tab=='thread'){scrollTo(0,1e6);startPoll()}}catch(e){toast(e.message)}}
 async function setLoc(l){try{S.user=await api('profile','PUT',{...S.user,location:l});draw()}catch(e){toast(e.message)}}
 
 /* ---------- home ---------- */
@@ -172,7 +183,7 @@ async function myReqs(){const l=await api('requests');
 const payBox=r=>{const d=r.deal;if(!d)return '';const tot=d.qty*d.price+(S.del=='farmer'?d.fee:0);
   return `<div class="mut">${esc(d.farmer)} accepted: ${d.qty} kg at ${K(d.price)}/kg</div><div class="mut">Payment</div>${chips([['mobile','Mobile money (demo)'],['cash','Cash on pickup']],S.pay,'setPay')}<div class="mut">Delivery</div>${chips([['farmer','Farmer delivers +'+K(d.fee)],['buyer','I will collect']],S.del,'setDel')}<button class="btn" onclick="confirmReq(${r.id})">Confirm · ${K(tot)}</button>`};
 function rcard(r){const st=r.status,m=r.matches||[];let tag,body='';
-  const ml=m.map(x=>`<div class="mut">• ${esc(x.farmer)} · ${K(x.price)}/kg · ${x.score}% match</div>`).join('');
+  const ml=m.map(x=>`<div class="between"><span class="mut">• ${esc(x.farmer)} · ${K(x.price)}/kg · ${x.score}% match</span><button class="chip" style="padding:4px 10px;font-size:11px" onclick="openChat('${x.farmer_id}')">Message</button></div>`).join('');
   if(st=='open'&&r.active){tag='Open · '+left(r.left)+' left';body=m.length?`<div class="mut">Farmers who can fill this:</div>${ml}`:'<div class="mut">Waiting for farmers who grow this nearby.</div>'}
   else if(st=='open'){tag='Ended';body=m.length?`<div class="mut">No farmer accepted in time. Closest deals:</div>${ml}<button class="btn" onclick="renew(${r.id},${r.suggest})">Renew with ${K(r.suggest)} budget</button>`:'<div class="mut">No farmer lists this right now. Try again later.</div>'}
   else if(st=='accepted'){tag='Accepted';body=payBox(r)}else tag='Ordered ✓';
@@ -183,7 +194,7 @@ async function renew(id,b){try{await api('requests/'+id+'/renew','PUT',{budget:b
 async function confirmReq(id){try{const c=S.pay=='cash',r=await api('requests/'+id+'/confirm','POST',{payment:c?'cash_pickup':'mobile_money',delivery:S.del});
   toast(c?'Order placed. Pay '+K(r.total)+' when you collect':'Paid '+K(r.total)+' (demo) · '+r.ref);draw()}catch(e){toast(e.message)}}
 async function incoming(){const l=await api('incoming');
-  return `<h2>Buyer requests near you</h2>`+(l.length?l.map(r=>`<div class="card col"><div class="between"><b>${r.emoji} ${r.qty} kg ${r.produce}</b><span class="tag">${r.score}% match</span></div><div class="mut">${esc(r.buyer)} · ${esc(r.location)} · ${r.km} km · budget ${K(r.budget)} · ${left(r.left)} left</div><button class="btn" onclick="accept(${r.id},${r.listing_id})">Accept at ${K(r.lprice)}/kg</button></div>`).join(''):'<div class="empty">No open requests match your produce right now. Add listings in Sell to get matched.</div>')}
+  return `<h2>Buyer requests near you</h2>`+(l.length?l.map(r=>`<div class="card col"><div class="between"><b>${r.emoji} ${r.qty} kg ${r.produce}</b><span class="tag">${r.score}% match</span></div><div class="mut">${esc(r.buyer)} · ${esc(r.location)} · ${r.km} km · budget ${K(r.budget)} · ${left(r.left)} left</div><button class="btn" onclick="accept(${r.id},${r.listing_id})">Accept at ${K(r.lprice)}/kg</button><button class="chip" onclick="openChat('${r.buyer_id}')">Message ${esc(r.buyer)}</button></div>`).join(''):'<div class="empty">No open requests match your produce right now. Add listings in Sell to get matched.</div>')}
 async function accept(id,l){try{await api('requests/'+id+'/accept','POST',{listingId:l});toast('Accepted. The buyer will choose payment and delivery.');draw()}catch(e){toast(e.message)}}
 
 /* ---------- plan (buyer) / sell (farmer) ---------- */
@@ -211,6 +222,18 @@ async function saveProfile(c){try{S.user=await api('profile','PUT',{name:V('pn')
 async function notif(){const l=await api('notifications');
   return `<h2>Notifications</h2>`+(l.length?l.map(n=>`<div class="card col"><div>${esc(n.text)}</div><div class="mut">${new Date(n.ts).toLocaleString()}</div></div>`).join(''):'<div class="empty">Nothing yet. Match alerts and order updates show up here.</div>')}
 
-const VIEWS={home,browse,reqs,plan:planView,me:meView,notif};
+/* ---------- chat ---------- */
+const openChat=id=>{S.with=id;go('thread')};
+const bubbles=m=>m.map(x=>`<div style="align-self:${x.mine?'flex-end':'flex-start'};max-width:80%;background:${x.mine?'var(--g)':'var(--card)'};color:${x.mine?'var(--ink)':'#fff'};padding:8px 12px;border-radius:14px;word-break:break-word">${esc(x.body)}<div style="font-size:10px;opacity:.6;margin-top:2px">${new Date(x.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>`).join('')||'<div class="empty">Say hello 👋</div>';
+async function chatList(){const l=await api('chats');
+  return `<h2>Messages</h2>`+(l.length?l.map(c=>`<div class="card" style="cursor:pointer" onclick="openChat('${c.id}')"><div class="img" style="width:48px;height:48px;font-size:24px;border-radius:50%">${c.role=='farmer'?'🧑‍🌾':'🛒'}</div><div class="grow"><div class="between"><b>${esc(c.name)}</b>${c.unread?`<span class="tag">${c.unread}</span>`:''}</div><div class="mut" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.last||'Tap to start a chat')}</div><div class="mut">${esc(c.location)}</div></div></div>`).join(''):'<div class="empty">No chats yet. You can message a buyer or farmer once a request matches their produce, or after an order.</div>')}
+async function threadView(){const t=await api('thread?q='+S.with);S.mc=t.msgs.length;
+  return `<div class="between" style="margin-bottom:10px"><button class="ic" aria-label="Back" onclick="go('chat')">←</button><b style="font-size:18px;flex:1;margin-left:8px">${esc(t.other.name)}</b><span class="mut">${esc(t.other.location)}</span></div><div id="msgs" style="display:flex;flex-direction:column;gap:6px;min-height:45vh;padding-bottom:80px">${bubbles(t.msgs)}</div><div style="position:fixed;bottom:calc(66px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:100%;max-width:480px;padding:8px 16px;background:var(--bg);display:flex;gap:8px"><input id="mt" placeholder="Type a message" maxlength="1000" onkeydown="if(event.key=='Enter')sendMsg()"><button class="btn" style="width:auto;padding:0 20px" onclick="sendMsg()">Send</button></div>`}
+async function refreshThread(){try{const t=await api('thread?q='+S.with),m=E('msgs');if(m&&t.msgs.length!=S.mc){S.mc=t.msgs.length;m.innerHTML=bubbles(t.msgs);scrollTo(0,1e6)}}catch(e){}}
+function startPoll(){clearInterval(S.poll);S.poll=setInterval(()=>{S.tab=='thread'?refreshThread():clearInterval(S.poll)},5000)}
+async function sendMsg(){const i=E('mt'),v=i.value.trim();if(!v)return;i.value='';try{await api('send','POST',{to:S.with,body:v});refreshThread()}catch(e){i.value=v;toast(e.message)}}
+setInterval(()=>{if(S.user)api('unread').then(n=>{S.unread=n;const b=E('ub');if(b){b.textContent=n||'';b.style.display=n?'':'none'}}).catch(()=>{})},20000);
+
+const VIEWS={home,browse,reqs,plan:planView,me:meView,notif,chat:chatList,thread:threadView};
 (async()=>{try{const r=await api('me');S.user=r.user;S.cat=r.cat}catch(e){}draw()})();
 </script></body></html>
