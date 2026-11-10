@@ -1,0 +1,216 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#181a20">
+<title>Mobile Market Link</title>
+<link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#181a20;--card:#1f222a;--line:#35383f;--g:#22c55e;--mut:#9ca3af;--ink:#0b1f12;color-scheme:dark}
+*{box-sizing:border-box;margin:0}
+body{background:#0f1115;color:#fff;font:600 14px Urbanist,system-ui,sans-serif}
+button,input,select{font-family:inherit}
+#app{max-width:480px;margin:auto;min-height:100vh;background:var(--bg);padding:calc(16px + env(safe-area-inset-top,0px)) 16px 96px}
+h2{font-size:20px;font-weight:700;margin:18px 0 10px}
+.card{background:var(--card);border-radius:16px;padding:12px;margin-bottom:12px;display:flex;gap:12px;align-items:center}
+.card.col{flex-direction:column;align-items:stretch;gap:8px}
+.img{width:72px;height:72px;border-radius:12px;background:#2a2e38;display:grid;place-items:center;font-size:36px;flex:none}
+.grow{flex:1;min-width:0}.between{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.mut{color:var(--mut);font-size:12px}.price{color:var(--g);font-weight:800;font-size:16px}
+.chip{border:1px solid var(--g);color:var(--g);background:none;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--g);color:var(--ink)}
+.row{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px}
+.btn{background:var(--g);color:var(--ink);border:0;border-radius:999px;padding:14px;font-size:15px;font-weight:800;width:100%;cursor:pointer;box-shadow:0 4px 14px #22c55e55}
+input,select{width:100%;background:var(--card);border:1px solid var(--line);color:#fff;border-radius:12px;padding:13px;font-size:14px;font-weight:600}
+select option{background:var(--card)}
+button:focus-visible,input:focus,select:focus{outline:2px solid var(--g)}
+.tag{font-size:10px;padding:3px 8px;border-radius:6px;background:var(--g);color:var(--ink);font-weight:800;white-space:nowrap}.tag.o{background:#f59e0b}
+.promo{flex:none;width:min(86%,360px);scroll-snap-align:start;border-radius:20px;padding:20px;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.promo span{font-size:60px}.big{font-size:30px;font-weight:800;line-height:1.1}.sm{font-size:12px;font-weight:700;margin-top:6px;max-width:170px}
+.snap{scroll-snap-type:x mandatory}
+.cats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 8px;text-align:center;font-size:12px}
+.cats>div{cursor:pointer}.ci{width:56px;height:56px;margin:0 auto 4px;border-radius:50%;background:var(--card);display:grid;place-items:center;font-size:28px}
+.empty{text-align:center;color:var(--mut);padding:32px 14px;background:var(--card);border-radius:16px}
+.ic{background:none;border:0;color:#fff;font-size:20px;cursor:pointer}
+.loc{width:auto;background:none;border:0;padding:0;font-size:15px;font-weight:800}
+nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--card);display:flex;padding:8px 0 calc(8px + env(safe-area-inset-bottom));border-radius:20px 20px 0 0;border-top:1px solid var(--line)}
+nav button{flex:1;background:none;border:0;color:var(--mut);font-size:11px;font-weight:700;cursor:pointer}nav button.on{color:var(--g)}
+#toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(16px);background:var(--g);color:var(--ink);padding:10px 18px;border-radius:999px;font-weight:800;opacity:0;transition:.25s;pointer-events:none;max-width:90%;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%)}
+@media(prefers-reduced-motion:reduce){#toast{transition:none}}
+@media(min-width:900px){#app{max-width:880px}nav{max-width:880px}.list{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}}
+</style></head><body><div id="app"></div><div id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const E=id=>document.getElementById(id),V=id=>E(id).value;
+const S={tab:'home',user:null,cat:[],token:(()=>{try{return localStorage.getItem('t')}catch(e){return null}})(),sort:'rank',season:false,q:'',days:3,pay:'mobile',del:'farmer',freq:'weekly',reg:false,role:'farmer',rc:'home'};
+const TOWNS=['Lusaka','Chilanga','Kafue','Chongwe','Chibombo'];
+const CATS={farmer:[['home','Home garden'],['small','Small scale'],['large','Large scale']],buyer:[['consumer','Direct consumer'],['small_shop','Small shop'],['large_shop','Large shop']]};
+const K=n=>'K'+Math.round(n*100)/100;
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const em=p=>(S.cat.find(c=>c.produce==p)||{}).emoji||'🧺';
+const opts=(a,v)=>a.map(x=>`<option ${x==v?'selected':''}>${x}</option>`).join('');
+const chips=(a,cur,fn)=>`<div class="row">${a.map(([v,l])=>`<button class="chip ${v==cur?'on':''}" onclick="${fn}('${v}')">${l}</button>`).join('')}</div>`;
+const left=ms=>{const h=Math.floor(ms/36e5);return h>=24?Math.floor(h/24)+'d '+h%24+'h':h+'h'};
+function toast(m){const t=E('toast');t.textContent=m;t.className='show';clearTimeout(toast.h);toast.h=setTimeout(()=>t.className='',3200)}
+/* ---------- backend (Supabase) ---------- */
+const SUPABASE_URL='https://lbbggyrtfoshtrpscrrp.supabase.co',SUPABASE_ANON_KEY='sb_publishable_rv_6QV7Pl4h8ZXuz7f5isw_Kgyn__L6';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+const api=(()=>{
+const DAY=864e5,MIN=65,TIER={home:1,small:2,large:3},FM={home:1.1,small:1,large:.9},DISC={consumer:0,small_shop:.05,large_shop:.1};
+const GEO={Lusaka:[-15.39,28.32],Chilanga:[-15.55,28.27],Kafue:[-15.77,28.18],Chongwe:[-15.33,28.68],Chibombo:[-14.66,28.07]};
+class Err extends Error{constructor(c,m){super(m);this.code=c}}
+const ok=({data,error})=>{if(error)throw new Err(400,error.message);return data};
+const now=()=>Date.now(),r2=x=>Math.round(x*100)/100,dsc=u=>DISC[u.category]||0,live=r=>r.created+r.days*DAY>now();
+const km=(a,b)=>GEO[a]&&GEO[b]?Math.round(Math.hypot((GEO[a][0]-GEO[b][0])*111,(GEO[a][1]-GEO[b][1])*107)):50;
+let CAT=null;
+const cats=async()=>{if(!CAT)CAT=ok(await sb.from('produce').select('*').order('tier').order('name'));const m=new Date().getMonth()+1;return CAT.map(p=>({produce:p.name,emoji:p.emoji,tier:p.tier,price:+p.price,season:p.months.includes(m)}))};
+const C=p=>CAT.find(c=>c.name==p),inS=p=>C(p).months.includes(new Date().getMonth()+1),rec=(p,c)=>Math.round(+C(p).price*FM[c]);
+const season=()=>{const m=new Date().getMonth()+1;return m>=11||m<=3?'rainy season':m<=8?'cool dry season':'hot dry season'};
+const uid=async()=>{const{data}=await sb.auth.getSession();if(!data.session)throw new Err(401,'Please sign in');return data.session.user};
+const me=async()=>{const u=await uid();return{...ok(await sb.from('profiles').select('*').eq('id',u.id).single()),email:u.email}};
+const role=async r=>{const u=await me();if(u.role!=r)throw new Err(403,'Only '+r+'s can do this');return u};
+const sess=async()=>({token:(await uid()).id,user:await me(),cat:await cats()});
+const snap=async()=>{await cats();const[l,r,p]=(await Promise.all([sb.from('listings').select('*').gt('qty',0),sb.from('requests').select('*'),sb.from('public_profiles').select('*')])).map(ok),P={};p.forEach(x=>P[x.id]=x);
+ const L=l.map(x=>{const f=P[x.farmer_id]||{};return{...x,qty:+x.qty,price:+x.price,farmer:f.name,loc:f.location,fcat:f.category}});
+ const R=r.map(x=>({...x,qty:+x.qty,budget:+x.budget,created:Date.parse(x.created_at)}));return{L,R,P}};
+const demand=(R,p)=>R.filter(r=>r.produce==p&&r.status=='open'&&live(r)).length;
+const score=(r,l)=>{if(r.produce!=l.produce)return 0;const s=40+Math.floor(25*Math.min(1,l.qty/r.qty))+Math.floor(15*Math.max(0,1-km(r.location,l.loc)/80))+(inS(l.produce)?10:0);return l.price*r.qty<=r.budget?s+10:s};
+const matches=(r,min,L)=>L.map(l=>({...l,score:score(r,l)})).filter(l=>l.score>=min).sort((a,b)=>b.score-a.score);
+const sat=m=>{const d=new Date();if(m)d.setMonth(d.getMonth()+1,1);else d.setDate(d.getDate()+1);while(d.getDay()!=6)d.setDate(d.getDate()+1);return d.toLocaleDateString('en-CA')};
+const plan=(s,u,L)=>{const m=matches({produce:s.produce,qty:s.qty,budget:1e9,location:u.location},1,L);if(m[0]){s.farmer=m[0].farmer;s.price=m[0].price}s.next=sat(s.freq=='monthly');s.location=u.location;s.buyer=u.name;return s};
+const R={
+'POST register':async b=>{const e=(b.email||'').trim().toLowerCase();
+ if(!(b.name||'').trim()||!e||(b.password||'').length<6)throw new Err(400,'Enter your name, email and a password of 6+ characters');
+ const{data,error}=await sb.auth.signUp({email:e,password:b.password,options:{data:{name:b.name.trim(),role:b.role,category:b.category,location:b.location,phone:b.phone||''}}});
+ if(error)throw new Err(400,error.message);
+ if(!data.session)throw new Err(400,'Check your email to confirm your account, then sign in');
+ return sess()},
+'POST login':async b=>{const{error}=await sb.auth.signInWithPassword({email:(b.email||'').trim().toLowerCase(),password:b.password||''});if(error)throw new Err(401,'Wrong email or password');return sess()},
+'GET me':async()=>({user:await me(),cat:await cats()}),
+'PUT profile':async b=>{const u=await me();
+ ok(await sb.from('profiles').update({name:(b.name||'').trim()||u.name,phone:b.phone||'',location:GEO[b.location]?b.location:'Lusaka',...(b.category?{category:b.category}:{})}).eq('id',u.id));return me()},
+'GET produce':async(b,id,q)=>{const u=await me(),{L,R}=await snap(),t=q.toLowerCase().trim(),d=dsc(u);
+ return L.filter(l=>!t||(l.produce+' '+l.farmer+' '+l.loc).toLowerCase().includes(t)).map(l=>{const se=inS(l.produce),dm=demand(R,l.produce),k=km(u.location,l.loc);return{...l,emoji:C(l.produce).emoji,seasonal:se,km:k,demand:dm,price:r2(l.price*(1-d)),rank:(se?0:1000)-dm*5+k}}).sort((a,b)=>a.rank-b.rank)},
+'GET recommend':async()=>{const u=await me(),f=u.role=='farmer',{L,R}=await snap(),items=[],bought=f?[]:ok(await sb.from('orders').select('produce'));
+ CAT.forEach(c=>{const p=c.name;if(!inS(p))return;
+  if(f){if(c.tier>TIER[u.category])return;const dm=demand(R,p);items.push({produce:p,emoji:c.emoji,price:rec(p,u.category),note:dm+' buyer requests open · suggested price',rank:-dm})}
+  else{const mine=L.filter(l=>l.produce==p);if(!mine.length)return;const near=Math.min(...mine.map(l=>km(u.location,l.loc))),low=Math.min(...mine.map(l=>l.price))*(1-dsc(u)),n=bought.filter(o=>o.produce==p).length;items.push({produce:p,emoji:c.emoji,price:r2(low),note:(n?`You’ve bought this ${n}× · `:'In season · ')+near+' km away',rank:near-n*100})}});
+ return{season:season(),discount:Math.round(dsc(u)*100),items:items.sort((a,b)=>a.rank-b.rank)}},
+'POST listings':async b=>{const u=await role('farmer');await cats();if(!C(b.produce))throw new Err(400,'Choose a produce item');const qty=+b.qty;if(!(qty>0))throw new Err(400,'Enter a quantity in kg');
+ ok(await sb.from('listings').insert({produce:b.produce,qty,price:b.price?+b.price:rec(b.produce,u.category)}));return{ok:true}},
+'GET my/listings':async()=>{const u=await role('farmer');return ok(await sb.from('listings').select('*').eq('farmer_id',u.id).order('id',{ascending:false})).map(x=>({...x,qty:+x.qty,price:+x.price}))},
+'DELETE listings/:id':async(b,id)=>{await role('farmer');ok(await sb.from('listings').delete().eq('id',id));return{ok:true}},
+'POST requests':async b=>{await role('buyer');const qty=+b.qty,bud=+b.budget;if(!(qty>0&&bud>0))throw new Err(400,'Enter an amount and a budget');
+ return ok(await sb.rpc('create_request',{p_produce:b.produce,p_qty:qty,p_budget:bud,p_location:b.location,p_days:+b.days||3}))},
+'GET requests':async()=>{const u=await role('buyer'),{L,P}=await snap(),mine=ok(await sb.from('requests').select('*').eq('buyer_id',u.id).order('id',{ascending:false}));
+ return mine.map(x=>{const r={...x,qty:+x.qty,budget:+x.budget,created:Date.parse(x.created_at)},end=r.created+r.days*DAY,o={...r,emoji:C(r.produce).emoji,left:Math.max(0,end-now()),active:end>now()};
+  if(r.status=='open'){const all=matches(r,1,L);o.matches=all.slice(0,3);if(all.length)o.suggest=Math.ceil(Math.min(...all.map(l=>l.price))*(1-dsc(u))*r.qty)}
+  else if(r.status=='accepted'){const l=L.find(y=>y.id==r.listing_id);if(l){const f=P[l.farmer_id]||{};o.deal={farmer:f.name,qty:Math.min(r.qty,l.qty),price:r2(l.price*(1-dsc(u))),fee:20+2*km(r.location,f.location)}}}
+  return o})},
+'PUT requests/:id/renew':async(b,id)=>({farmers:ok(await sb.rpc('renew_request',{p_id:id,p_budget:+b.budget,p_days:+b.days||3}))}),
+'GET incoming':async()=>{const u=await role('farmer'),{L,R,P}=await snap(),out=[];
+ R.filter(r=>r.status=='open'&&live(r)).forEach(r=>{const l=matches(r,MIN,L).find(x=>x.farmer_id==u.id);if(l)out.push({...r,buyer:(P[r.buyer_id]||{}).name,listing_id:l.id,lprice:l.price,score:l.score,km:km(r.location,u.location),emoji:C(r.produce).emoji,left:r.created+r.days*DAY-now()})});return out},
+'POST requests/:id/accept':async(b,id)=>{ok(await sb.rpc('accept_request',{p_id:id,p_listing:+b.listingId}));return{ok:true}},
+'POST requests/:id/confirm':async(b,id)=>ok(await sb.rpc('confirm_order',{p_id:id,p_payment:b.payment,p_delivery:b.delivery})),
+'GET orders':async()=>{await uid();const o=ok(await sb.from('orders').select('*').order('id',{ascending:false})),P={};ok(await sb.from('public_profiles').select('id,name')).forEach(x=>P[x.id]=x.name);
+ return o.map(x=>({...x,qty:+x.qty,total:+x.total,buyer:P[x.buyer_id],farmer:P[x.farmer_id]}))},
+'POST subs':async b=>{await role('buyer');const qty=+b.qty;if(!(qty>0)||!b.produce)throw new Err(400,'Choose produce and a quantity per delivery');ok(await sb.from('subscriptions').insert({produce:b.produce,qty,freq:b.freq=='monthly'?'monthly':'weekly'}));return{ok:true}},
+'DELETE subs/:id':async(b,id)=>{await role('buyer');ok(await sb.from('subscriptions').delete().eq('id',id));return{ok:true}},
+'GET subs':async()=>{const u=await role('buyer'),{L}=await snap();return ok(await sb.from('subscriptions').select('*').order('id',{ascending:false})).map(x=>plan({...x,qty:+x.qty},u,L))},
+'GET deliveries':async()=>{await role('farmer');return ok(await sb.rpc('my_deliveries')).map(x=>({...x,qty:+x.qty,next:sat(x.freq=='monthly')}))},
+'GET notifications':async()=>{await uid();return ok(await sb.from('notifications').select('*').order('id',{ascending:false}).limit(30)).map(n=>({...n,ts:n.created_at}))}};
+return async(p,m='GET',b)=>{try{const[path,qs]=p.split('?'),seg=path.split('/'),id=+(seg.find(x=>/^\d+$/.test(x))||0),h=R[m+' '+seg.map(x=>/^\d+$/.test(x)?':id':x).join('/')];
+ if(!h)throw new Err(404,'Not found');return await h(b||{},id,new URLSearchParams(qs||'').get('q')||'')}
+ catch(e){if(e.code==401&&S.user)logout();if(!(e instanceof Err)){console.error(e);throw new Error('Check your connection and try again')}throw e}}
+})();
+const go=t=>{S.tab=t;scrollTo(0,0);draw()};
+function logout(){sb.auth.signOut();S.user=null;S.token=null;try{localStorage.removeItem('t')}catch(e){}draw()}
+
+/* ---------- auth ---------- */
+function auth(){const r=S.reg;return `<div style="text-align:center;margin:36px 0 22px"><div style="font-size:56px">🌾</div><h1 style="font-size:28px;font-weight:800">Mobile Market Link</h1><p class="mut" style="margin-top:6px">Fresh produce, straight from farmers near you</p></div>
+${r?chips([['farmer','I grow produce'],['buyer','I buy produce']],S.role,'setRole')+chips(CATS[S.role],S.rc,'setRC')+`<input id="n" placeholder="Full name" style="margin-bottom:10px"><input id="ph" placeholder="Phone number" style="margin-bottom:10px"><select id="lo" style="margin-bottom:10px">${opts(TOWNS)}</select>`:''}
+<input id="e" type="email" placeholder="Email" style="margin-bottom:10px"><input id="p" type="password" placeholder="Password" style="margin-bottom:16px">
+<button class="btn" onclick="submitAuth()">${r?'Create account':'Sign in'}</button>
+<p class="mut" style="text-align:center;margin-top:16px"><a href="#" style="color:var(--g)" onclick="S.reg=!S.reg;draw();return false">${r?'I already have an account':'Create an account'}</a></p>
+${r?'':'<p class="mut" style="text-align:center;margin-top:12px">New here? Create an account to get started. Payments are simulated in this version.</p>'}`}
+const setRole=v=>{S.role=v;S.rc=CATS[v][0][0];draw()},setRC=v=>{S.rc=v;draw()};
+async function submitAuth(){try{const b={email:V('e'),password:V('p')};
+  if(S.reg)Object.assign(b,{name:V('n'),phone:V('ph'),location:V('lo'),role:S.role,category:S.rc});
+  const r=await api(S.reg?'register':'login','POST',b);S.token=r.token;try{localStorage.setItem('t',r.token)}catch(e){}S.user=r.user;S.cat=r.cat;S.tab='home';draw()}catch(e){toast(e.message)}}
+
+/* ---------- shell ---------- */
+const head=()=>`<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><div class="img" style="width:44px;height:44px;font-size:22px;border-radius:50%">${S.user.role=='farmer'?'🧑‍🌾':'🛒'}</div><div class="grow"><div class="mut">${S.user.role=='farmer'?'Selling from':'Deliver to'}</div><select class="loc" onchange="setLoc(this.value)">${opts(TOWNS,S.user.location)}</select></div><button class="ic" aria-label="Notifications" onclick="go('notif')">🔔</button></div>`;
+const nav=()=>`<nav>${[['home','🏠','Home'],['browse','🔍','Browse'],['reqs','📋','Requests'],['plan',S.user.role=='farmer'?'🌱':'🔁',S.user.role=='farmer'?'Sell':'Plan'],['me','👤','Profile']].map(([k,i,l])=>`<button class="${S.tab==k?'on':''}" onclick="go('${k}')"><div style="font-size:20px">${i}</div>${l}</button>`).join('')}</nav>`;
+async function draw(){const a=E('app');if(!S.user){a.innerHTML=auth();return}
+  try{const b=await VIEWS[S.tab]();a.innerHTML=head()+b+nav();if(S.tab=='browse')loadBrowse()}catch(e){toast(e.message)}}
+async function setLoc(l){try{S.user=await api('profile','PUT',{...S.user,location:l});draw()}catch(e){toast(e.message)}}
+
+/* ---------- home ---------- */
+const pick=p=>{S.q=p;go('browse')},newReq=p=>{S.pre=p;go('reqs')};
+async function home(){const r=await api('recommend'),b=S.user.role=='buyer',top=r.items[0];
+  const pr=(c,big,sm,ic,fn)=>`<div class="promo" style="background:${c}" onclick="${fn}"><div><div class="big">${big}</div><div class="sm">${sm}</div></div><span>${ic}</span></div>`;
+  return `<div class="row snap">${pr('#22c55e',b&&r.discount?r.discount+'% off':'Fresh',b?(r.discount?'member discount on every order':'from farms near you'):'Selling in the '+r.season,'🧺',"go('browse')")}
+  ${top?pr('#f59e0b',top.produce,'in season now · '+K(top.price)+'/kg',top.emoji,`pick('${top.produce}')`):''}
+  ${pr('#3b6cf5',b?'Weekly box':'Add produce',b?'subscribe for regular deliveries':'list what you can supply','📦',"go('plan')")}</div>
+  <h2>Produce</h2><div class="cats">${S.cat.map(c=>`<div onclick="pick('${c.produce}')" style="opacity:${c.season?1:.4}"><div class="ci">${c.emoji}</div>${c.produce}</div>`).join('')}</div>
+  <h2>${b?'Recommended for you':'What to sell this season'}</h2><div class="list">${r.items.map(i=>`<div class="card" style="cursor:pointer" onclick="${b?`newReq('${i.produce}')`:"go('plan')"}"><div class="img">${i.emoji}</div><div class="grow"><b style="font-size:16px">${i.produce}</b><div class="mut">${i.note}</div><span class="price">${K(i.price)}/kg</span></div></div>`).join('')||'<div class="empty">Nothing in season is listed nearby yet.</div>'}</div>`}
+
+/* ---------- browse ---------- */
+const lcard=l=>`<div class="card" ${S.user.role=='buyer'?`style="cursor:pointer" onclick="newReq('${l.produce}')"`:''}><div class="img">${l.emoji}</div><div class="grow"><b style="font-size:16px">${l.produce}</b><div class="mut">${esc(l.farmer)} · ${esc(l.loc)} · ${l.km} km</div><div class="mut">${l.qty} kg available</div><div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="price">${K(l.price)}/kg</span><span class="tag ${l.seasonal?'':'o'}">${l.seasonal?'In season':'Off season'}</span>${l.demand?`<span class="tag o">${l.demand} requests</span>`:''}</div></div></div>`;
+async function browse(){return `<input id="sq" placeholder="Search produce, farmers or towns" value="${esc(S.q)}" oninput="S.q=this.value;clearTimeout(S.t);S.t=setTimeout(loadBrowse,250)" style="margin-bottom:10px">
+<div class="row">${[['rank','Recommended'],['km','Nearest'],['price','Cheapest'],['demand','High demand']].map(([v,l])=>`<button class="chip ${S.sort==v?'on':''}" onclick="S.sort='${v}';draw()">${l}</button>`).join('')}<button class="chip ${S.season?'on':''}" onclick="S.season=!S.season;draw()">In season</button></div><div id="res" class="list"></div>`}
+async function loadBrowse(){try{let l=await api('produce?q='+encodeURIComponent(S.q));if(S.season)l=l.filter(x=>x.seasonal);
+  if(S.sort!='rank')l.sort((a,b)=>S.sort=='demand'?b.demand-a.demand:a[S.sort]-b[S.sort]);
+  const r=E('res');if(r)r.innerHTML=l.length?l.map(lcard).join(''):`<div class="empty" style="grid-column:1/-1">Nothing matches${S.q?' “'+esc(S.q)+'”':''}. Try another name or turn off In season.</div>`}catch(e){toast(e.message)}}
+
+/* ---------- requests ---------- */
+const setDays=v=>{S.days=+v;S.pre=V('rp');S.pq=V('rq');S.pb=V('rb');draw()};
+const setPay=v=>{S.pay=v;if(v=='cash')S.del='buyer';draw()};
+const setDel=v=>{if(S.pay=='cash'&&v=='farmer'){toast('Cash on pickup means you collect from the farm');return}S.del=v;draw()};
+async function reqs(){return S.user.role=='farmer'?incoming():myReqs()}
+async function myReqs(){const l=await api('requests');
+  return `<h2>New request</h2><div class="card col"><select id="rp">${opts(S.cat.map(c=>c.produce),S.pre)}</select><div style="display:flex;gap:8px"><input id="rq" type="number" placeholder="Amount (kg)" value="${S.pq||''}"><input id="rb" type="number" placeholder="Budget (K)" value="${S.pb||''}"></div><select id="rl">${opts(TOWNS,S.user.location)}</select><div class="mut">Keep it open for. Shorter means more urgent.</div>${chips([[2,'2 days'],[3,'3 days'],[5,'5 days'],[7,'7 days']],S.days,'setDays')}<button class="btn" onclick="sendReq()">Send request</button></div>
+  <h2>Your requests</h2>`+(l.length?l.map(rcard).join(''):'<div class="empty">No requests yet. Tell farmers what you need, how much, and your budget.</div>')}
+const payBox=r=>{const d=r.deal;if(!d)return '';const tot=d.qty*d.price+(S.del=='farmer'?d.fee:0);
+  return `<div class="mut">${esc(d.farmer)} accepted: ${d.qty} kg at ${K(d.price)}/kg</div><div class="mut">Payment</div>${chips([['mobile','Mobile money (demo)'],['cash','Cash on pickup']],S.pay,'setPay')}<div class="mut">Delivery</div>${chips([['farmer','Farmer delivers +'+K(d.fee)],['buyer','I will collect']],S.del,'setDel')}<button class="btn" onclick="confirmReq(${r.id})">Confirm · ${K(tot)}</button>`};
+function rcard(r){const st=r.status,m=r.matches||[];let tag,body='';
+  const ml=m.map(x=>`<div class="mut">• ${esc(x.farmer)} · ${K(x.price)}/kg · ${x.score}% match</div>`).join('');
+  if(st=='open'&&r.active){tag='Open · '+left(r.left)+' left';body=m.length?`<div class="mut">Farmers who can fill this:</div>${ml}`:'<div class="mut">Waiting for farmers who grow this nearby.</div>'}
+  else if(st=='open'){tag='Ended';body=m.length?`<div class="mut">No farmer accepted in time. Closest deals:</div>${ml}<button class="btn" onclick="renew(${r.id},${r.suggest})">Renew with ${K(r.suggest)} budget</button>`:'<div class="mut">No farmer lists this right now. Try again later.</div>'}
+  else if(st=='accepted'){tag='Accepted';body=payBox(r)}else tag='Ordered ✓';
+  return `<div class="card col"><div class="between"><b>${r.emoji} ${r.qty} kg ${r.produce}</b><span class="tag ${st=='ordered'?'':'o'}">${tag}</span></div><div class="mut">Budget ${K(r.budget)} · ${esc(r.location)}</div>${body}</div>`}
+async function sendReq(){try{const r=await api('requests','POST',{produce:V('rp'),qty:V('rq'),budget:V('rb'),location:V('rl'),days:S.days});
+  S.pre=S.pq=S.pb=null;toast(r.farmers?'Sent to '+r.farmers+' matching farmer'+(r.farmers>1?'s':''):'Request posted. Farmers who list this will be alerted.');draw()}catch(e){toast(e.message)}}
+async function renew(id,b){try{await api('requests/'+id+'/renew','PUT',{budget:b,days:3});toast('Request reopened for 3 days');draw()}catch(e){toast(e.message)}}
+async function confirmReq(id){try{const c=S.pay=='cash',r=await api('requests/'+id+'/confirm','POST',{payment:c?'cash_pickup':'mobile_money',delivery:S.del});
+  toast(c?'Order placed. Pay '+K(r.total)+' when you collect':'Paid '+K(r.total)+' (demo) · '+r.ref);draw()}catch(e){toast(e.message)}}
+async function incoming(){const l=await api('incoming');
+  return `<h2>Buyer requests near you</h2>`+(l.length?l.map(r=>`<div class="card col"><div class="between"><b>${r.emoji} ${r.qty} kg ${r.produce}</b><span class="tag">${r.score}% match</span></div><div class="mut">${esc(r.buyer)} · ${esc(r.location)} · ${r.km} km · budget ${K(r.budget)} · ${left(r.left)} left</div><button class="btn" onclick="accept(${r.id},${r.listing_id})">Accept at ${K(r.lprice)}/kg</button></div>`).join(''):'<div class="empty">No open requests match your produce right now. Add listings in Sell to get matched.</div>')}
+async function accept(id,l){try{await api('requests/'+id+'/accept','POST',{listingId:l});toast('Accepted. The buyer will choose payment and delivery.');draw()}catch(e){toast(e.message)}}
+
+/* ---------- plan (buyer) / sell (farmer) ---------- */
+const setFreq=v=>{S.freq=v;draw()};
+const ocard=o=>`<div class="card col"><div class="between"><b>${o.qty} kg ${o.produce}</b><span class="price">${K(o.total)}</span></div><div class="mut">${S.user.role=='farmer'?'Buyer: '+esc(o.buyer):'Farmer: '+esc(o.farmer)} · ${o.delivery}</div><div class="mut">${o.payment} · ${esc(o.ref)}</div></div>`;
+async function planView(){const f=S.user.role=='farmer',o=await api('orders');let top;
+  if(f){const [l,d]=await Promise.all([api('my/listings'),api('deliveries')]);const t={home:1,small:2,large:3}[S.user.category];
+    top=`<h2>Add produce</h2><div class="card col"><select id="lp">${opts(S.cat.filter(c=>c.tier<=t).map(c=>c.produce))}</select><div style="display:flex;gap:8px"><input id="lq" type="number" placeholder="Amount (kg)"><input id="lpr" type="number" placeholder="Price per kg (optional)"></div><div class="mut">Leave the price empty to use the suggested price for your farm size.</div><button class="btn" onclick="addListing()">Add listing</button></div>
+    <h2>Your listings</h2>${l.map(x=>`<div class="card"><div class="img" style="width:56px;height:56px;font-size:28px">${em(x.produce)}</div><div class="grow"><b>${x.produce}</b><div class="mut">${x.qty} kg · ${K(x.price)}/kg</div></div><button class="ic" aria-label="Remove" onclick="delListing(${x.id})">✕</button></div>`).join('')||'<div class="empty">Nothing listed yet. Add produce so buyers can find you.</div>'}
+    <h2>Weekly and monthly deliveries</h2>${d.map(x=>`<div class="card col"><div class="between"><b>${em(x.produce)} ${x.qty} kg ${x.produce}</b><span class="tag">${x.freq}</span></div><div class="mut">${esc(x.buyer)} · ${esc(x.location)} · next ${x.next}</div></div>`).join('')||'<div class="empty">No subscribers assigned to you yet.</div>'}`}
+  else{const l=await api('subs');
+    top=`<h2>Weekly and monthly boxes</h2><div class="card col"><select id="sp">${opts(S.cat.map(c=>c.produce))}</select><input id="sqn" type="number" placeholder="Amount per delivery (kg)">${chips([['weekly','Every week'],['monthly','Every month']],S.freq,'setFreq')}<button class="btn" onclick="subscribe()">Subscribe</button></div>`+
+    l.map(s=>`<div class="card"><div class="img">${em(s.produce)}</div><div class="grow"><b>${s.qty} kg ${s.produce} · ${s.freq}</b><div class="mut">${s.farmer?'From '+esc(s.farmer)+' · '+K(s.price)+'/kg':'Finding a farmer…'}</div><div class="mut">Next delivery ${s.next}</div></div><button class="ic" aria-label="Cancel" onclick="unsub(${s.id})">✕</button></div>`).join('')}
+  return top+`<h2>Orders</h2>`+(o.length?o.map(ocard).join(''):'<div class="empty">Confirmed orders will appear here.</div>')}
+async function addListing(){try{await api('listings','POST',{produce:V('lp'),qty:V('lq'),price:V('lpr')});toast('Listing added');draw()}catch(e){toast(e.message)}}
+async function delListing(i){try{await api('listings/'+i,'DELETE');draw()}catch(e){toast(e.message)}}
+async function subscribe(){try{await api('subs','POST',{produce:V('sp'),qty:V('sqn'),freq:S.freq});toast('Subscribed');draw()}catch(e){toast(e.message)}}
+async function unsub(i){try{await api('subs/'+i,'DELETE');draw()}catch(e){toast(e.message)}}
+
+/* ---------- profile + notifications ---------- */
+async function meView(){const u=S.user,f=u.role=='farmer';
+  return `<h2>Edit profile</h2><div class="card col"><input id="pn" value="${esc(u.name)}" placeholder="Name"><input id="pph" value="${esc(u.phone)}" placeholder="Phone number"><select id="pl">${opts(TOWNS,u.location)}</select><div class="mut">${f?'Farm size':'Buyer type'}</div>${chips(CATS[u.role],u.category,'saveProfile')}<button class="btn" onclick="saveProfile()">Save changes</button></div>
+  <p class="mut" style="margin:4px 0 16px">${f?'Farm size sets which produce you can list and the prices we suggest.':'Buyer type sets your discount and the deals we recommend.'}</p><button class="chip" style="width:100%;padding:12px" onclick="logout()">Sign out</button>`}
+async function saveProfile(c){try{S.user=await api('profile','PUT',{name:V('pn'),phone:V('pph'),location:V('pl'),category:c||S.user.category});toast('Profile saved');draw()}catch(e){toast(e.message)}}
+async function notif(){const l=await api('notifications');
+  return `<h2>Notifications</h2>`+(l.length?l.map(n=>`<div class="card col"><div>${esc(n.text)}</div><div class="mut">${new Date(n.ts).toLocaleString()}</div></div>`).join(''):'<div class="empty">Nothing yet. Match alerts and order updates show up here.</div>')}
+
+const VIEWS={home,browse,reqs,plan:planView,me:meView,notif};
+(async()=>{try{const r=await api('me');S.user=r.user;S.cat=r.cat}catch(e){}draw()})();
+</script></body></html>
